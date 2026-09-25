@@ -1,7 +1,7 @@
 // ---- Settings: the only two things you should need to change ----
 
 // Paste the Google Apps Script web app URL here (see README.md).
-const SHEET_URL = 'PASTE_YOUR_APPS_SCRIPT_URL_HERE';
+const SHEET_URL = 'https://script.google.com/macros/s/AKfycbw--_Xjc6FGlAjxhGxaKsaCZ_JVxIK0EUxNJpz_ZOoZwVtgBnuGb2H4F5HhhtNjwVt40Q/exec';
 
 // The buttons people tap. "Other" asks them to type what they're doing.
 const ACTIVITIES = [
