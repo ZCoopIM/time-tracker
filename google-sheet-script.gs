@@ -1,3 +1,5 @@
+/** @OnlyCurrentDoc */ // only lets this script touch this one spreadsheet
+
 // Paste this into the Google Sheet: Extensions → Apps Script. See README.md.
 //
 // Each person gets their own tab, named after them. Each check-in adds a row;
@@ -19,6 +21,9 @@ function doPost(e) {
 
     if (d.type === 'in' && !row) { // "!row" means a resent check-in won't be added twice
       sheet.appendRow([time, d.activity, d.note || '', time, '', '', d.id]);
+      const last = sheet.getLastRow(); // appendRow ignores column formats, so set them per row
+      sheet.getRange(last, 1).setNumberFormat('ddd m/d/yyyy');
+      sheet.getRange(last, 4, 1, 2).setNumberFormat('h:mm am/pm');
     } else if (d.type === 'out' && row) {
       sheet.getRange(row, 5).setValue(time);
       sheet.getRange(row, 6).setFormula(`=ROUND((E${row}-D${row})*24, 2)`);
