@@ -91,6 +91,12 @@ input:focus { outline: none; border-color: var(--black); }
 .btn.primary { background: var(--black); color: var(--white); }
 .btn:active, .row:active { opacity: 0.6; }
 
+/* Sign in with Google: the G mark sits on a white tile so its colors hold on black */
+.btn.google { display: flex; align-items: center; gap: 14px; }
+.btn.google svg { width: 30px; height: 30px; padding: 6px; background: var(--white); }
+.btn:disabled { opacity: 0.5; }
+.status { font-size: 15px; color: var(--secondary); padding: 8px var(--inset) 0; min-height: 1.4em; }
+
 .link {
   background: none;
   padding: 8px 0;
