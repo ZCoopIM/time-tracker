@@ -9,7 +9,8 @@ working with no signal: taps are saved on the device and sent once it's back onl
 
 ## How people use it
 
-1. Open the link, type your name once. The device remembers it.
+1. Open the link and tap **Sign in with Google** with your @infinitemachine.com account.
+   The device stays signed in; your tab in the sheet is named from your Google account.
 2. Tap what you're doing. A timer starts.
 3. Tap **Check out** when done, or tap a different task to switch (this checks you out of the
    first one automatically).
@@ -48,7 +49,21 @@ To check it worked, open the Web app URL in a browser. You should see
 > If you edit the script later, use **Deploy → Manage deployments → Edit → New version**
 > so the URL stays the same.
 
-### 2. Put the app online
+### 2. Turn on Google sign-in
+
+Only signed-in @infinitemachine.com accounts can add entries. This needs a Google sign-in ID:
+
+1. In Google Cloud (project **IM Time Tracker**), **Google Auth Platform**: audience **Internal**,
+   and a **Web application** client with the app's address as an authorized JavaScript origin
+   and redirect URI (`https://timetracker.infinitemachine.com` and `.../`).
+2. Put the client ID in `GOOGLE_CLIENT_ID` in both `app.js` and `google-sheet-script.gs`.
+3. In the Apps Script editor, pick **authorize** next to Run and run it once, so Google asks
+   for permission to check sign-ins ("Connect to an external service").
+
+Sign-ins last a year per device. To sign everyone out, delete `SESSION_SECRET` under
+**Project Settings → Script Properties** in the Apps Script editor.
+
+### 3. Put the app online
 
 The app has to be at an `https://` address for the home-screen install to work. Any static
 host works: GitHub Pages, Vercel, Netlify. It's just the files in this folder, with no build step.

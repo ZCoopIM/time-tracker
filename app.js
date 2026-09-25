@@ -1,7 +1,11 @@
-// ---- Settings: the only two things you should need to change ----
+// ---- Settings ----
 
-// Paste the Google Apps Script web app URL here (see README.md).
-const SHEET_URL = 'https://script.google.com/macros/s/AKfycbw--_Xjc6FGlAjxhGxaKsaCZ_JVxIK0EUxNJpz_ZOoZwVtgBnuGb2H4F5HhhtNjwVt40Q/exec';
+// The Google Apps Script web app that writes to the sheet (see README.md).
+const SHEET_URL = 'https://script.google.com/macros/s/AKfycbyTmXz_Fwydt-RkJQGsrATojgcmHTrcoG_yuFu-J3r4H_hHxYszMn1VwS4GpCT6DbW6Aw/exec';
+
+// Google sign-in: the app's OAuth client ID (see README.md) and the only allowed account domain.
+const GOOGLE_CLIENT_ID = '1056506310679-dhv65s90fnc6fjev24va2c6k57n731oj.apps.googleusercontent.com';
+const DOMAIN = 'infinitemachine.com';
 
 // The buttons people tap. "Other" asks them to type what they're doing.
 const ACTIVITIES = [
@@ -13,7 +17,7 @@ const ACTIVITIES = [
 ];
 
 // ---- Saved on this device ----
-// name:    who is using this device
+// user:    who is signed in on this device: { name, email, session }
 // current: what they're checked in to right now, or null
 // queue:   check-ins/outs not yet confirmed by the Google Sheet (e.g. while offline)
 
@@ -31,17 +35,14 @@ const $ = (id) => document.getElementById(id);
 // ---- Screens ----
 
 function render() {
-  const name = store.get('name', '');
-  $('name-screen').hidden = !!name;
-  $('main-screen').hidden = !name;
-  if (!name) {
-    $('name-input').focus();
-    return;
-  }
+  const user = store.get('user', null);
+  $('sign-in-screen').hidden = !!user;
+  $('main-screen').hidden = !user;
+  if (!user) return;
 
   const current = store.get('current', null);
-  $('who').textContent = name;
-  $('change-name').hidden = !!current;
+  $('who').textContent = user.name;
+  $('sign-out').hidden = !!current;
   $('current').hidden = !current;
   $('prompt').textContent = current ? 'Switch task' : 'Select task';
 
@@ -112,7 +113,9 @@ function checkOut() {
 
 function send(item) {
   const queue = store.get('queue', []);
-  queue.push({ ...item, name: store.get('name', '') });
+  // Each update carries the sign-in of whoever made it, so it's credited to them
+  // even if someone else signs in on this device before it's sent.
+  queue.push({ ...item, session: store.get('user', {}).session });
   store.set('queue', queue);
   flush();
 }
@@ -124,8 +127,11 @@ async function flush() {
   try {
     let queue = store.get('queue', []);
     while (queue.length) {
-      const res = await fetch(SHEET_URL, { method: 'POST', body: JSON.stringify(queue[0]) });
-      const result = await res.json();
+      const item = queue[0];
+      const user = store.get('user', null);
+      if (!item.session && !user) break; // wait until someone signs in
+      const result = await post({ ...item, session: item.session || user.session });
+      if (result.auth) { signOut(); break; } // sign-in no longer valid: keep the queue, ask again
       if (!result.ok) throw new Error(result.error);
       queue = store.get('queue', []);
       queue.shift();
@@ -140,6 +146,11 @@ async function flush() {
   }
 }
 
+async function post(body) {
+  const res = await fetch(SHEET_URL, { method: 'POST', body: JSON.stringify(body) });
+  return res.json();
+}
+
 function renderSync() {
   const n = store.get('queue', []).length;
   const el = $('sync');
@@ -152,23 +163,61 @@ window.addEventListener('online', flush);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) { flush(); render(); } });
 setInterval(flush, 30000);
 
+// ---- Google sign-in ----
+// A full-page trip to Google and back (works in iPhone home-screen apps, where pop-ups don't).
+// Google returns a signed ID token; the sheet's script checks it and hands back a long-lived
+// session, so people stay signed in and entries queued offline still send later.
+
+function signIn() {
+  const nonce = crypto.getRandomValues(new Uint32Array(4)).join('-');
+  store.set('nonce', nonce);
+  const params = new URLSearchParams({
+    client_id: GOOGLE_CLIENT_ID,
+    redirect_uri: location.origin + location.pathname,
+    response_type: 'id_token',
+    scope: 'openid email profile',
+    hd: DOMAIN, // only offer Infinite Machine accounts
+    prompt: 'select_account',
+    nonce,
+  });
+  location.href = 'https://accounts.google.com/o/oauth2/v2/auth?' + params;
+}
+
+async function finishSignIn() {
+  const hash = new URLSearchParams(location.hash.slice(1));
+  if (!hash.has('id_token') && !hash.has('error')) return;
+  history.replaceState(null, '', location.pathname); // don't leave the token in the address bar
+  if (hash.has('error')) return showSignInError('Sign-in was cancelled.');
+
+  $('sign-in').disabled = true;
+  $('sign-in-status').textContent = 'Signing in';
+  try {
+    const result = await post({ type: 'login', idToken: hash.get('id_token'), nonce: store.get('nonce', '') });
+    if (!result.ok) return showSignInError(result.error);
+    store.set('user', { name: result.name, email: result.email, session: result.session });
+    $('sign-in-status').textContent = '';
+    render();
+    flush();
+  } catch {
+    showSignInError('Could not reach the sheet. Check your connection and try again.');
+  } finally {
+    $('sign-in').disabled = false;
+  }
+}
+
+function showSignInError(msg) {
+  $('sign-in-status').textContent = msg;
+}
+
+function signOut() {
+  store.set('user', null);
+  render();
+}
+
 // ---- Buttons ----
 
-$('name-form').onsubmit = (e) => {
-  e.preventDefault();
-  // Tidy the name so "zach  cooper" and "Zach Cooper" land on the same sheet tab.
-  const name = $('name-input').value.trim().replace(/\s+/g, ' ')
-    .replace(/\b\w/g, (c) => c.toUpperCase());
-  if (!name) return;
-  store.set('name', name);
-  render();
-};
-
-$('change-name').onclick = () => {
-  store.set('name', '');
-  $('name-input').value = '';
-  render();
-};
+$('sign-in').onclick = signIn;
+$('sign-out').onclick = signOut;
 
 $('check-out').onclick = checkOut;
 
@@ -184,7 +233,9 @@ $('other-cancel').onclick = hideOtherForm;
 // ---- Start ----
 
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
-// Ask the browser not to clear saved data (the name and unsent entries) to free up space.
+// Ask the browser not to clear saved data (the sign-in and unsent entries) to free up space.
 if (navigator.storage && navigator.storage.persist) navigator.storage.persist();
+store.set('name', null); // left over from the version where people typed their name
 render();
+finishSignIn();
 flush();
