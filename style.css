@@ -1,0 +1,90 @@
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: #111827;
+  color: #f9fafb;
+  -webkit-tap-highlight-color: transparent;
+}
+
+main {
+  max-width: 520px;
+  margin: 0 auto;
+  padding: max(16px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom));
+}
+
+h1 { font-size: 28px; margin: 48px 0 24px; }
+
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 18px;
+  margin: 8px 0 24px;
+}
+
+input {
+  width: 100%;
+  font-size: 20px; /* 16px+ stops iPhone from zooming in */
+  padding: 16px;
+  border-radius: 12px;
+  border: 2px solid #374151;
+  background: #1f2937;
+  color: inherit;
+  margin-bottom: 12px;
+}
+input:focus { outline: none; border-color: #60a5fa; }
+
+button { font: inherit; cursor: pointer; }
+
+.big {
+  width: 100%;
+  font-size: 22px;
+  font-weight: 600;
+  padding: 22px;
+  border: none;
+  border-radius: 16px;
+  background: #374151;
+  color: #fff;
+}
+.big:active { transform: scale(0.98); }
+.primary { background: #2563eb; }
+.danger { background: #dc2626; }
+
+.link {
+  background: none;
+  border: none;
+  color: #93c5fd;
+  font-size: 16px;
+  padding: 8px;
+}
+
+.label { color: #9ca3af; font-size: 16px; margin: 0 0 12px; }
+
+#activities {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+#activities .big { min-height: 96px; }
+#activities .big:last-child:nth-child(odd) { grid-column: span 2; }
+
+#current {
+  background: #1f2937;
+  border-radius: 20px;
+  padding: 20px;
+  margin-bottom: 24px;
+  text-align: center;
+}
+#current-activity { font-size: 30px; font-weight: 700; margin: 0; }
+#current-timer { font-size: 48px; font-variant-numeric: tabular-nums; margin: 8px 0 0; }
+#current-since { color: #9ca3af; margin: 4px 0 20px; }
+.switch-label { margin: 20px 0 0; }
+
+#other-form { margin-top: 16px; }
+.row { display: flex; gap: 12px; }
+
+#sync { text-align: center; color: #9ca3af; font-size: 14px; margin-top: 28px; }
+#sync.waiting { color: #fbbf24; }
