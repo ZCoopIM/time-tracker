@@ -4,55 +4,61 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Time Tracker</title>
-  <meta name="theme-color" content="#111827">
+  <meta name="theme-color" content="#ffffff">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="Time Tracker">
   <link rel="manifest" href="manifest.json">
   <link rel="apple-touch-icon" href="icons/icon-180.png">
   <link rel="icon" href="icons/icon-192.png">
+  <!-- Michroma: free stand-in for Eurostile Extended, used only for the timer numerals -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Michroma&display=swap">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <main>
+    <header class="top">
+      <img class="wordmark" src="assets/im-wordmark.svg" alt="Infinite Machine">
+    </header>
+
     <!-- Step 1: who are you? (asked once, remembered on this device) -->
     <section id="name-screen" hidden>
-      <h1>What's your name?</h1>
+      <p class="eyebrow">Time Tracker</p>
+      <h1>Enter your name</h1>
       <form id="name-form">
         <input id="name-input" autocomplete="name" autocapitalize="words" placeholder="First and last name" required>
-        <button class="big primary" type="submit">Continue</button>
+        <button class="btn primary" type="submit">Continue</button>
       </form>
     </section>
 
     <!-- Step 2: check in / check out -->
     <section id="main-screen" hidden>
-      <header>
-        <span>Hi, <strong id="who"></strong></span>
+      <div class="who">
+        <span id="who"></span>
         <button id="change-name" class="link">Not you?</button>
-      </header>
+      </div>
 
       <div id="current" hidden>
-        <p class="label">You're checked in to</p>
+        <p class="eyebrow"><span class="dot"></span>Checked in</p>
         <p id="current-activity"></p>
         <p id="current-timer">0:00:00</p>
         <p id="current-since"></p>
-        <button id="check-out" class="big danger">Check out</button>
-        <p class="label switch-label">Or switch to:</p>
+        <button id="check-out" class="btn primary">Check out</button>
       </div>
 
-      <p id="prompt" class="label">What are you doing? Tap to check in.</p>
+      <p id="prompt" class="eyebrow">Select task</p>
       <div id="activities"></div>
 
       <form id="other-form" hidden>
-        <input id="other-input" placeholder="What are you doing?" required>
-        <div class="row">
-          <button class="big primary" type="submit">Check in</button>
-          <button class="big" type="button" id="other-cancel">Cancel</button>
-        </div>
+        <input id="other-input" placeholder="What are you working on?" required>
+        <button class="btn primary" type="submit">Check in</button>
+        <button class="btn" type="button" id="other-cancel">Cancel</button>
       </form>
 
-      <p id="sync"></p>
+      <p id="sync" class="eyebrow"></p>
     </section>
   </main>
   <script src="app.js"></script>
