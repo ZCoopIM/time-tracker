@@ -5,11 +5,11 @@ const SHEET_URL = 'https://script.google.com/macros/s/AKfycbw--_Xjc6FGlAjxhGxaKs
 
 // The buttons people tap. "Other" asks them to type what they're doing.
 const ACTIVITIES = [
-  { name: 'QC', color: '#2563eb' },
-  { name: 'Fabrication', color: '#7c3aed' },
-  { name: 'Servicing', color: '#059669' },
-  { name: 'Transport', color: '#d97706' },
-  { name: 'Other', color: '#4b5563', askForNote: true },
+  { name: 'QC' },
+  { name: 'Fabrication' },
+  { name: 'Servicing' },
+  { name: 'Transport' },
+  { name: 'Other', askForNote: true },
 ];
 
 // ---- Saved on this device ----
@@ -43,11 +43,11 @@ function render() {
   $('who').textContent = name;
   $('change-name').hidden = !!current;
   $('current').hidden = !current;
-  $('prompt').hidden = !!current;
+  $('prompt').textContent = current ? 'Switch task' : 'Select task';
 
   if (current) {
     $('current-activity').textContent = current.note ? `${current.activity}: ${current.note}` : current.activity;
-    $('current-since').textContent = 'since ' + new Date(current.time).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    $('current-since').textContent = 'Since ' + new Date(current.time).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
     tick();
   }
 
@@ -56,9 +56,9 @@ function render() {
   for (const a of ACTIVITIES) {
     if (current && current.activity === a.name && !a.askForNote) continue; // already doing this one
     const b = document.createElement('button');
-    b.className = 'big';
-    b.style.background = a.color;
-    b.textContent = a.name;
+    b.className = 'row';
+    b.innerHTML = '<span></span><svg class="chevron" viewBox="0 0 8 14" aria-hidden="true"><path d="M1 1l6 6-6 6"/></svg>';
+    b.firstChild.textContent = a.name;
     b.onclick = () => (a.askForNote ? showOtherForm() : checkIn(a.name, ''));
     list.appendChild(b);
   }
@@ -143,8 +143,8 @@ async function flush() {
 function renderSync() {
   const n = store.get('queue', []).length;
   const el = $('sync');
-  el.className = n ? 'waiting' : '';
-  el.textContent = n ? `${n} update${n > 1 ? 's' : ''} waiting to send…` : 'All saved ✓';
+  el.classList.toggle('waiting', n > 0);
+  el.textContent = n ? `${n} update${n > 1 ? 's' : ''} waiting to send` : 'All saved';
 }
 
 // Retry when the connection comes back, when the app is reopened, and every 30 seconds.
@@ -184,5 +184,7 @@ $('other-cancel').onclick = hideOtherForm;
 // ---- Start ----
 
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
+// Ask the browser not to clear saved data (the name and unsent entries) to free up space.
+if (navigator.storage && navigator.storage.persist) navigator.storage.persist();
 render();
 flush();

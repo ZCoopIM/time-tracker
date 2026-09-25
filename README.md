@@ -55,10 +55,19 @@ host works: GitHub Pages, Vercel, Netlify. It's just the files in this folder, w
 
 ## Changing the task buttons
 
-Edit the `ACTIVITIES` list at the top of `app.js`. Add, remove or rename entries, or change colors.
+Edit the `ACTIVITIES` list at the top of `app.js`. Add, remove or rename entries.
 
 ## Files
 
 - `index.html`, `style.css`, `app.js`: the app
 - `sw.js`, `manifest.json`, `icons/`: what makes it installable and work offline
+- `assets/im-wordmark.svg`: the Infinite Machine wordmark, from the IM design system
 - `google-sheet-script.gs`: the code that runs inside the Google Sheet
+
+## Look and feel
+
+Styled after the Infinite Machine design system's Olto app kit: white page, flat light-gray
+rows, black type at regular weight, small uppercase gray labels, and Electric Green only for
+the "checked in" dot. Text uses the device's built-in system font, as the Olto app does. The
+timer uses Michroma (a free Google font) as a stand-in for Eurostile Extended, because the
+brand's Helvetica Now and Eurostile fonts are licensed and this repo is public.
