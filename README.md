@@ -53,6 +53,10 @@ To check it worked, open the Web app URL in a browser. You should see
 The app has to be at an `https://` address for the home-screen install to work. Any static
 host works: GitHub Pages, Vercel, Netlify. It's just the files in this folder, with no build step.
 
+**Live at https://timetracker.infinitemachine.com**, served by GitHub Pages from `main`. The
+`CNAME` file tells GitHub the address; the domain's DNS (managed in Hover) has a CNAME record
+`timetracker` → `zcoopim.github.io`.
+
 ## Changing the task buttons
 
 Edit the `ACTIVITIES` list at the top of `app.js`. Add, remove or rename entries.
