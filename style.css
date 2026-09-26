@@ -38,8 +38,8 @@ p { margin: 0; }
 button { font: inherit; color: inherit; cursor: pointer; border: 0; border-radius: 0; }
 
 /* Header */
-.top { padding: 20px var(--inset) 28px; }
-.wordmark { display: block; height: 11px; }
+.top { padding: 20px 0 28px; }
+.wordmark { display: block; width: 100%; height: auto; } /* spans the full width, edge to edge with the rows */
 
 /* Small uppercase label */
 .eyebrow {
