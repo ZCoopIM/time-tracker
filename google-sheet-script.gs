@@ -2,14 +2,16 @@
 
 // Paste this into the Google Sheet: Extensions → Apps Script. See README.md.
 //
-// Each person gets their own tab, named after them. Each check-in adds a row;
-// the matching check-out fills in the end time and hours on that same row.
+// Everything goes in one "Time Log" tab, with a column for who it was. Each check-in
+// adds a row; the matching check-out fills in the end time and hours on that same row.
 //
 // Only people signed in with an Infinite Machine Google account can add entries:
 // the app sends Google's sign-in token here once, this script checks it with Google
 // and hands back a session that the app includes with every entry.
 
-const HEADERS = ['Date', 'Activity', 'Note', 'Check In', 'Check Out', 'Hours', 'Entry ID'];
+const LOG_TAB = 'Time Log';
+const HEADERS = ['Date', 'Name', 'Email', 'Activity', 'Note', 'Check In', 'Check Out', 'Hours', 'Entry ID'];
+const COL = { email: 3, checkIn: 6, checkOut: 7, hours: 8, id: 9 }; // column numbers in HEADERS
 const GOOGLE_CLIENT_ID = '1056506310679-dhv65s90fnc6fjev24va2c6k57n731oj.apps.googleusercontent.com'; // same as in app.js
 const DOMAIN = 'infinitemachine.com';
 const SESSION_DAYS = 365; // how long someone stays signed in on a device
@@ -29,21 +31,22 @@ function doPost(e) {
   const lock = LockService.getScriptLock();
   lock.waitLock(20000); // one write at a time, so two people tapping at once can't collide
   try {
-    const name = String(user.name).replace(/[\[\]*?/\\:]/g, '').trim().slice(0, 90);
-    if (!name || !d.id || !d.time) throw new Error('Missing name, id or time');
+    if (!d.id || !d.time) throw new Error('Missing id or time');
 
-    const sheet = getOrCreateTab(name);
+    const sheet = getLogTab();
     const time = new Date(d.time);
     const row = findRow(sheet, d.id);
 
     if (d.type === 'in' && !row) { // "!row" means a resent check-in won't be added twice
-      sheet.appendRow([time, d.activity, d.note || '', time, '', '', d.id]);
-      const last = sheet.getLastRow(); // appendRow ignores column formats, so set them per row
-      sheet.getRange(last, 1).setNumberFormat('ddd m/d/yyyy');
-      sheet.getRange(last, 4, 1, 2).setNumberFormat('h:mm am/pm');
+      addRow(sheet, [time, user.name, user.email, d.activity, d.note || '', time, '', '', d.id]);
     } else if (d.type === 'out' && row) {
-      sheet.getRange(row, 5).setValue(time);
-      sheet.getRange(row, 6).setFormula(`=ROUND((E${row}-D${row})*24, 2)`);
+      // People can only check out of their own entries. Rows moved over from the old
+      // per-person tabs have no email yet, so the first signed-in check-out claims them.
+      const owner = sheet.getRange(row, COL.email).getValue();
+      if (owner && owner !== user.email) return reply({ ok: true, ignored: true }); // not theirs: drop it, don't retry
+      if (!owner) sheet.getRange(row, COL.email).setValue(user.email);
+      sheet.getRange(row, COL.checkOut).setValue(time);
+      setHours(sheet, row);
     }
     return reply({ ok: true });
   } catch (err) {
@@ -107,24 +110,56 @@ function doGet() {
   return reply({ ok: true, message: 'Time tracker is running' });
 }
 
-function getOrCreateTab(name) {
+function getLogTab() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  let sheet = ss.getSheetByName(name);
+  let sheet = ss.getSheetByName(LOG_TAB);
   if (sheet) return sheet;
 
-  sheet = ss.insertSheet(name);
+  sheet = ss.insertSheet(LOG_TAB, 0); // first tab
   sheet.appendRow(HEADERS);
   sheet.getRange(1, 1, 1, HEADERS.length).setFontWeight('bold');
   sheet.setFrozenRows(1);
-  sheet.getRange('A:A').setNumberFormat('ddd m/d/yyyy');
-  sheet.getRange('D:E').setNumberFormat('h:mm am/pm');
-  sheet.getRange('F:F').setNumberFormat('0.00');
-  sheet.hideColumns(7); // Entry ID is only used to match check-outs to check-ins
+  sheet.hideColumns(COL.id); // Entry ID is only used to match check-outs to check-ins
   return sheet;
 }
 
+function addRow(sheet, values) {
+  sheet.appendRow(values);
+  const last = sheet.getLastRow(); // appendRow ignores column formats, so set them per row
+  sheet.getRange(last, 1).setNumberFormat('ddd m/d/yyyy');
+  sheet.getRange(last, COL.checkIn, 1, 2).setNumberFormat('h:mm am/pm');
+  sheet.getRange(last, COL.hours).setNumberFormat('0.00');
+  return last;
+}
+
+function setHours(sheet, row) {
+  sheet.getRange(row, COL.hours).setFormula(`=ROUND((G${row}-F${row})*24, 2)`);
+}
+
+// One-time move from the old layout (a tab per person) into the Time Log tab.
+// Run it from the Apps Script editor (pick "moveTabsIntoLog" next to Run). It copies each
+// person's rows in, using the tab name as their name, then deletes the "Setup Test" tab.
+// The old per-person tabs are left in place so you can check them before deleting.
+function moveTabsIntoLog() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const log = getLogTab();
+  const oldHeaders = ['Date', 'Activity', 'Note', 'Check In', 'Check Out', 'Hours', 'Entry ID'];
+  for (const tab of ss.getSheets()) {
+    const name = tab.getName();
+    if (name === LOG_TAB) continue;
+    if (name === 'Setup Test') { ss.deleteSheet(tab); continue; }
+    const rows = tab.getDataRange().getValues();
+    if (rows.length < 2 || rows[0].join('|') !== oldHeaders.join('|')) continue; // not an old person tab
+    for (const [date, activity, note, checkIn, checkOut, , id] of rows.slice(1)) {
+      if (findRow(log, id)) continue; // already moved
+      const row = addRow(log, [date, name, '', activity, note, checkIn, checkOut, '', id]);
+      if (checkOut) setHours(log, row);
+    }
+  }
+}
+
 function findRow(sheet, id) {
-  const cell = sheet.getRange('G:G').createTextFinder(String(id)).matchEntireCell(true).findNext();
+  const cell = sheet.getRange(1, COL.id, sheet.getMaxRows()).createTextFinder(String(id)).matchEntireCell(true).findNext();
   return cell ? cell.getRow() : null;
 }
 

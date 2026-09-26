@@ -2,7 +2,7 @@
 
 A one-screen app for employees to check in and out of what they're working on
 (QC, Fabrication, Servicing, Transport, Other). Every check-in and check-out goes to a
-Google Sheet, with one tab per person.
+Google Sheet, all in one "Time Log" tab with a column for who it was.
 
 Works on iPhone, iPad and computers. Can be added to the home screen like an app, and keeps
 working with no signal: taps are saved on the device and sent once it's back online.
@@ -10,7 +10,7 @@ working with no signal: taps are saved on the device and sent once it's back onl
 ## How people use it
 
 1. Open the link and tap **Sign in with Google** with your @infinitemachine.com account.
-   The device stays signed in; your tab in the sheet is named from your Google account.
+   The device stays signed in; your name and email in the sheet come from your Google account.
 2. Tap what you're doing. A timer starts.
 3. Tap **Check out** when done, or tap a different task to switch (this checks you out of the
    first one automatically).
@@ -20,14 +20,15 @@ Computer: in Chrome or Edge, click the install icon in the address bar.
 
 ## What the sheet looks like
 
-Each person gets a tab named after them, created the first time they check in:
+Everything goes in one **Time Log** tab, one row per check-in:
 
-| Date | Activity | Note | Check In | Check Out | Hours |
-|---|---|---|---|---|---|
-| Fri 9/25/2026 | QC | | 8:02 am | 10:15 am | 2.22 |
-| Fri 9/25/2026 | Other | Cleaning shop | 10:15 am | | |
+| Date | Name | Email | Activity | Note | Check In | Check Out | Hours |
+|---|---|---|---|---|---|---|---|
+| Fri 9/25/2026 | Zach Cooper | zach@infinitemachine.com | QC | | 8:02 am | 10:15 am | 2.22 |
+| Fri 9/25/2026 | Eddie Cohen | eddie@infinitemachine.com | Other | Cleaning shop | 10:15 am | | |
 
-A row with no Check Out means they're working on it right now. (There's also a hidden
+Name and email come from the person's Google sign-in. A row with no Check Out means they're
+working on it right now. Filter or sort by Name to see one person. (There's also a hidden
 "Entry ID" column that matches check-outs to check-ins; leave it alone.)
 
 ## One-time setup
