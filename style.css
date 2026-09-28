@@ -148,8 +148,19 @@ input:focus { outline: none; border-color: var(--black); }
 #sync { text-align: center; margin: 32px 0 0; }
 #sync.waiting { color: var(--black); }
 
-/* "My day" button sits apart from the task list */
-#day-open { margin-top: 36px; }
+/* "My day" button: smaller, centered, black, so it doesn't read as another task */
+#day-open {
+  justify-content: center;
+  gap: 12px;
+  width: auto;
+  height: 56px;
+  margin: 36px auto 0;
+  padding: 0 36px;
+  font-size: 17px;
+  background: var(--black);
+  color: var(--white);
+}
+#day-open .chevron { stroke: var(--white); }
 
 /* My day: day picker, big total, then rows of task + time */
 .day-nav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; }
