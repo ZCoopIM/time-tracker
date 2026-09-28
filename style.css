@@ -147,3 +147,33 @@ input:focus { outline: none; border-color: var(--black); }
 
 #sync { text-align: center; margin: 32px 0 0; }
 #sync.waiting { color: var(--black); }
+
+/* "My day" button sits apart from the task list */
+#day-open { margin-top: 36px; }
+
+/* My day: day picker, big total, then rows of task + time */
+.day-nav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; }
+.day-nav button { width: 72px; height: 72px; background: var(--row); display: grid; place-items: center; }
+.day-nav button:active { opacity: 0.6; }
+.day-nav button:disabled { opacity: 0.3; cursor: default; }
+#day-date { font-size: 19px; }
+#day-total {
+  font-family: var(--numerals);
+  font-size: clamp(44px, 14vw, 64px);
+  line-height: 1.1;
+  padding: 0 var(--inset) 4px;
+}
+#day-total + .eyebrow { margin-bottom: 36px; }
+.day-list { display: grid; gap: var(--gutter); margin-bottom: 36px; }
+.day-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 72px;
+  padding: 14px 22px 14px var(--inset);
+  background: var(--row);
+}
+.day-name { font-size: 19px; display: flex; align-items: center; gap: 8px; }
+.day-detail { font-size: 15px; color: var(--secondary); margin-top: 4px; }
+.day-time { font-size: 19px; white-space: nowrap; font-variant-numeric: tabular-nums; }

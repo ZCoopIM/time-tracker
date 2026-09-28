@@ -27,6 +27,7 @@ function doPost(e) {
 
   const user = readSession(d.session);
   if (!user) return reply({ ok: false, auth: true, error: 'Not signed in' });
+  if (d.type === 'day') return reply(day(user, d)); // only reads, so no need to wait for the lock
 
   const lock = LockService.getScriptLock();
   lock.waitLock(20000); // one write at a time, so two people tapping at once can't collide
@@ -54,6 +55,25 @@ function doPost(e) {
   } finally {
     lock.releaseLock();
   }
+}
+
+// The signed-in person's check-ins between d.from and d.to (the start and end of the day
+// in their own time zone), for the app's "My day" screen. Only ever their own rows.
+function day(user, d) {
+  const from = new Date(d.from), to = new Date(d.to);
+  const entries = [];
+  for (const [, name, email, activity, note, checkIn, checkOut, , id] of getLogTab().getDataRange().getValues().slice(1)) {
+    if (!(checkIn instanceof Date) || checkIn < from || checkIn >= to) continue;
+    if (email ? email !== user.email : name !== user.name) continue; // rows moved over from the old per-person tabs have only a name
+    entries.push({
+      id: String(id),
+      activity,
+      note,
+      checkIn: checkIn.toISOString(),
+      checkOut: checkOut instanceof Date ? checkOut.toISOString() : null,
+    });
+  }
+  return { ok: true, entries };
 }
 
 // Checks Google's sign-in token and, if it's a verified Infinite Machine account,
