@@ -59,7 +59,36 @@
         <button class="btn" type="button" id="other-cancel">Cancel</button>
       </form>
 
+      <button id="day-open" class="row">
+        <span>My day</span><svg class="chevron" viewBox="0 0 8 14" aria-hidden="true"><path d="M1 1l6 6-6 6"/></svg>
+      </button>
+
       <p id="sync" class="eyebrow"></p>
+    </section>
+
+    <!-- What you worked on, and for how long, one day at a time -->
+    <section id="day-screen" hidden>
+      <div class="who">
+        <button id="day-back" class="link">‹ Back</button>
+      </div>
+
+      <div class="day-nav">
+        <button id="day-prev" aria-label="Previous day"><svg class="chevron" viewBox="0 0 8 14" aria-hidden="true"><path d="M7 1L1 7l6 6"/></svg></button>
+        <p id="day-date"></p>
+        <button id="day-next" aria-label="Next day"><svg class="chevron" viewBox="0 0 8 14" aria-hidden="true"><path d="M1 1l6 6-6 6"/></svg></button>
+      </div>
+
+      <p id="day-total"></p>
+      <p class="eyebrow">Total</p>
+
+      <div id="day-tasks-block">
+        <p class="eyebrow">By task</p>
+        <div id="day-tasks" class="day-list"></div>
+        <p class="eyebrow">Timeline</p>
+        <div id="day-entries" class="day-list"></div>
+      </div>
+
+      <p id="day-status" class="status"></p>
     </section>
   </main>
   <script src="app.js"></script>

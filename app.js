@@ -37,8 +37,10 @@ const $ = (id) => document.getElementById(id);
 function render() {
   const user = store.get('user', null);
   $('sign-in-screen').hidden = !!user;
-  $('main-screen').hidden = !user;
+  $('main-screen').hidden = !user || viewingDay;
+  $('day-screen').hidden = !user || !viewingDay;
   if (!user) return;
+  if (viewingDay) renderDay();
 
   const current = store.get('current', null);
   $('who').textContent = user.name;
@@ -74,6 +76,7 @@ function tick() {
   const m = String(Math.floor(secs / 60) % 60).padStart(2, '0');
   const s = String(secs % 60).padStart(2, '0');
   $('current-timer').textContent = `${h}:${m}:${s}`;
+  if (viewingDay) renderDay(); // keeps today's running task counting up
 }
 setInterval(tick, 1000);
 
@@ -87,6 +90,127 @@ function showOtherForm() {
 function hideOtherForm() {
   $('activities').hidden = false;
   $('other-form').hidden = true;
+}
+
+// ---- My day ----
+// Asks the sheet for one day of the person's check-ins, then adds anything from this
+// device that hasn't reached the sheet yet, so it's right even with no signal.
+
+let viewingDay = false;
+let dayStart = startOfDay(new Date()); // midnight at the start of the day being shown
+let sheetEntries = []; // what the sheet sent back for that day
+let dayRequest = 0;    // so a slow answer for a day you've moved away from is ignored
+
+function startOfDay(date) {
+  const d = new Date(date);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+function addDays(date, n) {
+  const d = new Date(date);
+  d.setDate(d.getDate() + n); // not + 24 hours, so daylight-saving days still line up
+  return d;
+}
+
+function openDay(start) {
+  viewingDay = true;
+  dayStart = start;
+  sheetEntries = [];
+  render();
+  loadDay();
+}
+
+async function loadDay() {
+  const request = ++dayRequest;
+  const user = store.get('user', null);
+  $('day-status').textContent = 'Loading';
+  try {
+    const result = await post({ type: 'day', session: user.session, from: dayStart.toISOString(), to: addDays(dayStart, 1).toISOString() });
+    if (request !== dayRequest) return;
+    if (result.auth) return signOut();
+    if (!result.ok) throw new Error(result.error);
+    sheetEntries = result.entries;
+    $('day-status').textContent = '';
+  } catch (err) {
+    if (request !== dayRequest) return;
+    console.warn('Could not load the day:', err);
+    $('day-status').textContent = "Couldn't reach the sheet. Only showing what's on this device.";
+  }
+  renderDay();
+}
+
+// The day's entries, oldest first: the sheet's, plus check-ins and check-outs still waiting to send.
+function dayEntries() {
+  const byId = new Map(sheetEntries.map((e) => [e.id, { ...e }]));
+  const session = store.get('user', {}).session;
+  for (const q of store.get('queue', [])) {
+    if (q.session !== session) continue;
+    if (q.type === 'in' && !byId.has(q.id)) byId.set(q.id, { id: q.id, activity: q.activity, note: q.note, checkIn: q.time, checkOut: null });
+    if (q.type === 'out' && byId.has(q.id)) byId.get(q.id).checkOut = q.time;
+  }
+  const from = dayStart.getTime(), to = addDays(dayStart, 1).getTime();
+  return [...byId.values()]
+    .filter((e) => { const t = new Date(e.checkIn).getTime(); return t >= from && t < to; })
+    .sort((a, b) => new Date(a.checkIn) - new Date(b.checkIn));
+}
+
+function renderDay() {
+  const today = startOfDay(new Date());
+  const current = store.get('current', null);
+  const sameYear = dayStart.getFullYear() === today.getFullYear();
+  $('day-date').textContent = dayStart.getTime() === today.getTime() ? 'Today'
+    : dayStart.getTime() === addDays(today, -1).getTime() ? 'Yesterday'
+    : dayStart.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric', year: sameYear ? undefined : 'numeric' });
+  $('day-next').disabled = dayStart >= today;
+
+  const entries = dayEntries();
+  let total = 0;
+  const tasks = new Map(); // task name -> milliseconds
+  const timeline = [];
+  for (const e of entries) {
+    const running = !e.checkOut && current && current.id === e.id;
+    const end = e.checkOut ? new Date(e.checkOut) : running ? Date.now() : new Date(e.checkIn);
+    const ms = Math.max(0, end - new Date(e.checkIn)); // never negative, even if a phone's clock was off
+    const name = e.note ? `${e.activity}: ${e.note}` : e.activity;
+    total += ms;
+    if (e.checkOut || running) tasks.set(name, (tasks.get(name) || 0) + ms); // a forgotten check-out has no time to count
+    const until = e.checkOut ? clock(e.checkOut) : running ? 'now' : 'no check-out';
+    timeline.push({ name, detail: `${clock(e.checkIn)} – ${until}`, time: running || e.checkOut ? duration(ms) : '', running });
+  }
+
+  $('day-total').textContent = duration(total);
+  $('day-tasks-block').hidden = !entries.length;
+  fillList($('day-tasks'), [...tasks].sort((a, b) => b[1] - a[1]).map(([name, ms]) => ({ name, time: duration(ms) })));
+  fillList($('day-entries'), timeline);
+  if (!entries.length && !$('day-status').textContent) $('day-status').textContent = 'Nothing logged this day.';
+  if (entries.length && $('day-status').textContent === 'Nothing logged this day.') $('day-status').textContent = '';
+}
+
+function fillList(list, items) {
+  list.innerHTML = '';
+  for (const item of items) {
+    const row = document.createElement('div');
+    row.className = 'day-row';
+    row.innerHTML = '<div><p class="day-name"></p><p class="day-detail"></p></div><p class="day-time"></p>';
+    row.querySelector('.day-name').textContent = item.name;
+    row.querySelector('.day-detail').textContent = item.detail || '';
+    row.querySelector('.day-detail').hidden = !item.detail;
+    row.querySelector('.day-time').textContent = item.time;
+    if (item.running) row.querySelector('.day-name').insertAdjacentHTML('afterbegin', '<span class="dot"></span>');
+    list.appendChild(row);
+  }
+}
+
+function clock(time) {
+  return new Date(time).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+}
+
+// 2h 05m, or 45m under an hour
+function duration(ms) {
+  const mins = Math.floor(ms / 60000);
+  const h = Math.floor(mins / 60);
+  return h ? `${h}h ${String(mins % 60).padStart(2, '0')}m` : `${mins}m`;
 }
 
 // ---- Check in / check out ----
@@ -160,7 +284,7 @@ function renderSync() {
 
 // Retry when the connection comes back, when the app is reopened, and every 30 seconds.
 window.addEventListener('online', flush);
-document.addEventListener('visibilitychange', () => { if (!document.hidden) { flush(); render(); } });
+document.addEventListener('visibilitychange', () => { if (!document.hidden) { flush(); render(); if (viewingDay) loadDay(); } });
 setInterval(flush, 30000);
 
 // ---- Google sign-in ----
@@ -220,6 +344,11 @@ $('sign-in').onclick = signIn;
 $('sign-out').onclick = signOut;
 
 $('check-out').onclick = checkOut;
+
+$('day-open').onclick = () => openDay(startOfDay(new Date()));
+$('day-back').onclick = () => { viewingDay = false; dayRequest++; render(); };
+$('day-prev').onclick = () => openDay(addDays(dayStart, -1));
+$('day-next').onclick = () => openDay(addDays(dayStart, 1));
 
 $('other-form').onsubmit = (e) => {
   e.preventDefault();

@@ -15,6 +15,11 @@ working with no signal: taps are saved on the device and sent once it's back onl
 3. Tap **Check out** when done, or tap a different task to switch (this checks you out of the
    first one automatically).
 
+**My day:** tap **My day** at the bottom to see the total hours for the day, time per task, and a
+timeline of each check-in. The arrows step back through earlier days. It reads from the sheet, and
+adds anything on the phone that hasn't sent yet, so it's right even offline (earlier days need
+signal).
+
 **Add to home screen:** iPhone/iPad: open in Safari → Share → *Add to Home Screen*.
 Computer: in Chrome or Edge, click the install icon in the address bar.
 
