@@ -42,6 +42,14 @@
         <button id="sign-out" class="link">Sign out</button>
       </div>
 
+      <!-- Shown after the 7 PM automatic check-out -->
+      <div id="notice" hidden>
+        <p class="eyebrow">Checked out automatically</p>
+        <p id="notice-text"></p>
+        <button id="notice-continue" class="btn primary">Continue</button>
+        <button id="notice-edit" class="btn">Edit my time</button>
+      </div>
+
       <div id="current" hidden>
         <p class="eyebrow"><span class="dot"></span>Checked in</p>
         <p id="current-activity"></p>
@@ -78,15 +86,33 @@
         <button id="day-next" aria-label="Next day"><svg class="chevron" viewBox="0 0 8 14" aria-hidden="true"><path d="M1 1l6 6-6 6"/></svg></button>
       </div>
 
-      <p id="day-total"></p>
-      <p class="eyebrow">Total</p>
+      <div id="day-view">
+        <p id="day-total"></p>
+        <p class="eyebrow">Total</p>
 
-      <div id="day-tasks-block">
-        <p class="eyebrow">By task</p>
-        <div id="day-tasks" class="day-list"></div>
-        <p class="eyebrow">Timeline</p>
-        <div id="day-entries" class="day-list"></div>
+        <div id="day-tasks-block">
+          <p class="eyebrow">By task</p>
+          <div id="day-tasks" class="day-list"></div>
+          <p class="eyebrow">Timeline · tap to fix a time</p>
+          <div id="day-entries" class="day-list"></div>
+        </div>
+
+        <button id="day-add" class="btn">+ Add time you forgot to check in</button>
       </div>
+
+      <!-- Fixing a time, or adding a missed one -->
+      <form id="edit-form" hidden novalidate>
+        <p id="edit-title" class="eyebrow"></p>
+        <div id="edit-task-fields">
+          <select id="edit-activity" aria-label="Task"></select>
+          <input id="edit-note" placeholder="What were you working on?">
+        </div>
+        <label class="field"><span>Check in</span><input id="edit-in" type="time"></label>
+        <label class="field" id="edit-out-field"><span>Check out</span><input id="edit-out" type="time"></label>
+        <p id="edit-error" class="status"></p>
+        <button class="btn primary" type="submit">Save</button>
+        <button class="btn" type="button" id="edit-cancel">Cancel</button>
+      </form>
 
       <p id="day-status" class="status"></p>
     </section>

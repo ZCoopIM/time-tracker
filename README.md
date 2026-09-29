@@ -20,6 +20,14 @@ timeline of each check-in. The arrows step back through earlier days. It reads f
 adds anything on the phone that hasn't sent yet, so it's right even offline (earlier days need
 signal).
 
+**Fixing a time:** in My day, tap any entry in the timeline to change its check-in or check-out
+(forgot to check out, worked past 7), or tap **Add time you forgot to check in**.
+
+**7 PM check-out:** anyone still checked in at 7 PM is checked out at 7:00 PM. They get an email
+with **Continue** (it's right) and **Edit my time** (opens that entry to fix), and the app shows the
+same message next time it's opened. Someone who checked in after 7 is closed the next evening with
+no time counted, for them to fix.
+
 **Add to home screen:** iPhone/iPad: open in Safari → Share → *Add to Home Screen*.
 Computer: in Chrome or Edge, click the install icon in the address bar.
 
@@ -35,6 +43,10 @@ Everything goes in one **Time Log** tab, one row per check-in:
 Name and email come from the person's Google sign-in. A row with no Check Out means they're
 working on it right now. Filter or sort by Name to see one person. (There's also a hidden
 "Entry ID" column that matches check-outs to check-ins; leave it alone.)
+
+The **Changes** column, after Entry ID, records anything that wasn't a normal tap, so it's easy
+to spot corrected hours: "Checked out automatically at 7 PM", "Edited 9/28 8:15 AM, was 5:00 PM to
+7:00 PM", "Added by hand 9/28 8:20 AM".
 
 ## One-time setup
 
@@ -68,6 +80,14 @@ Only signed-in @infinitemachine.com accounts can add entries. This needs a Googl
 
 Sign-ins last a year per device. To sign everyone out, delete `SESSION_SECRET` under
 **Project Settings → Script Properties** in the Apps Script editor.
+
+### 2b. Turn on the 7 PM check-out
+
+In the Apps Script editor, pick **setUpAutoCheckOut** next to Run and run it once, approving the
+permissions it asks for (sending email, running on a schedule). Do this **before** deploying a
+new version, or the web app stops working until it's approved. It checks every hour for anyone
+still checked in past 7 PM. The emails come from whoever ran it. The 7 PM is in the script's time
+zone (**Project Settings → Time zone**), so that has to match where people work.
 
 ### 3. Put the app online
 

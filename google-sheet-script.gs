@@ -4,17 +4,21 @@
 //
 // Everything goes in one "Time Log" tab, with a column for who it was. Each check-in
 // adds a row; the matching check-out fills in the end time and hours on that same row.
+// Anyone still checked in at 7 PM is checked out at 7 PM and emailed (see autoCheckOut).
+// People can fix their own times from the app; the Changes column records every fix.
 //
 // Only people signed in with an Infinite Machine Google account can add entries:
 // the app sends Google's sign-in token here once, this script checks it with Google
 // and hands back a session that the app includes with every entry.
 
 const LOG_TAB = 'Time Log';
-const HEADERS = ['Date', 'Name', 'Email', 'Activity', 'Note', 'Check In', 'Check Out', 'Hours', 'Entry ID'];
-const COL = { email: 3, checkIn: 6, checkOut: 7, hours: 8, id: 9 }; // column numbers in HEADERS
+const HEADERS = ['Date', 'Name', 'Email', 'Activity', 'Note', 'Check In', 'Check Out', 'Hours', 'Entry ID', 'Changes'];
+const COL = { date: 1, email: 3, checkIn: 6, checkOut: 7, hours: 8, id: 9, changes: 10 }; // column numbers in HEADERS
 const GOOGLE_CLIENT_ID = '1056506310679-dhv65s90fnc6fjev24va2c6k57n731oj.apps.googleusercontent.com'; // same as in app.js
 const DOMAIN = 'infinitemachine.com';
 const SESSION_DAYS = 365; // how long someone stays signed in on a device
+const AUTO_CHECK_OUT_HOUR = 19; // 7 PM, in the script's time zone (Project Settings); same as in app.js
+const APP_URL = 'https://timetracker.infinitemachine.com/'; // for the links in the 7 PM email
 
 function doPost(e) {
   let d;
@@ -40,14 +44,31 @@ function doPost(e) {
 
     if (d.type === 'in' && !row) { // "!row" means a resent check-in won't be added twice
       addRow(sheet, [time, user.name, user.email, d.activity, d.note || '', time, '', '', d.id]);
-    } else if (d.type === 'out' && row) {
-      // People can only check out of their own entries. Rows moved over from the old
-      // per-person tabs have no email yet, so the first signed-in check-out claims them.
+    } else if (d.type === 'add' && !row) { // time someone forgot to check in for, added from "My day"
+      const checkIn = new Date(d.checkIn), checkOut = new Date(d.checkOut);
+      if (!(checkOut > checkIn)) return reply({ ok: true, ignored: true }); // the app checks this too; drop it, don't retry
+      const added = addRow(sheet, [checkIn, user.name, user.email, d.activity, d.note || '', checkIn, checkOut, '', d.id, 'Added by hand ' + stamp(time)]);
+      setHours(sheet, added);
+    } else if ((d.type === 'out' || d.type === 'edit') && row) {
+      // People can only change their own entries. Rows moved over from the old
+      // per-person tabs have no email yet, so the first signed-in change claims them.
       const owner = sheet.getRange(row, COL.email).getValue();
       if (owner && owner !== user.email) return reply({ ok: true, ignored: true }); // not theirs: drop it, don't retry
       if (!owner) sheet.getRange(row, COL.email).setValue(user.email);
-      sheet.getRange(row, COL.checkOut).setValue(time);
-      setHours(sheet, row);
+      if (d.type === 'out') {
+        sheet.getRange(row, COL.checkOut).setValue(time);
+        setHours(sheet, row);
+        if (d.auto) addChange(sheet, row, AUTO_NOTE); // the app got to 7 PM before the hourly run did
+      } else {
+        const checkIn = new Date(d.checkIn), checkOut = d.checkOut ? new Date(d.checkOut) : null; // none: still checked in
+        if (checkOut && !(checkOut > checkIn)) return reply({ ok: true, ignored: true });
+        const [wasIn, wasOut] = sheet.getRange(row, COL.checkIn, 1, 2).getValues()[0];
+        sheet.getRange(row, COL.date).setValue(checkIn);
+        sheet.getRange(row, COL.checkIn).setValue(checkIn);
+        if (checkOut) sheet.getRange(row, COL.checkOut).setValue(checkOut);
+        if (checkOut || wasOut) setHours(sheet, row);
+        addChange(sheet, row, `Edited ${stamp(time)}, was ${clock(wasIn)} to ${wasOut ? clock(wasOut) : 'no check-out'}`);
+      }
     }
     return reply({ ok: true });
   } catch (err) {
@@ -74,6 +95,84 @@ function day(user, d) {
     });
   }
   return { ok: true, entries };
+}
+
+// ---- Automatic check-out at 7 PM ----
+
+const AUTO_NOTE = 'Checked out automatically at 7 PM';
+
+// Runs every hour (see setUpAutoCheckOut). Anyone still checked in after 7 PM is checked
+// out at 7 PM and emailed, with a link to fix the time if they worked later.
+function autoCheckOut() {
+  const closed = [];
+  const lock = LockService.getScriptLock();
+  lock.waitLock(60000);
+  try {
+    const sheet = getLogTab();
+    const now = new Date();
+    sheet.getDataRange().getValues().forEach(([, , email, activity, note, checkIn, checkOut, , id], i) => {
+      if (i === 0 || !(checkIn instanceof Date) || checkOut) return; // header, or already checked out
+      const { due, end } = autoCheckOutTime(checkIn);
+      if (now < due) return;
+      const row = i + 1;
+      sheet.getRange(row, COL.checkOut).setValue(end);
+      setHours(sheet, row);
+      addChange(sheet, row, AUTO_NOTE);
+      // Only email about today's. The first run also closes old forgotten entries, quietly.
+      if (email && now - due < 864e5) closed.push({ email, activity, note, checkIn, end, id: String(id) });
+    });
+  } finally {
+    lock.releaseLock();
+  }
+  closed.forEach(sendAutoCheckOutEmail);
+}
+
+// When an open entry gets closed, and the check-out time it gets: 7 PM that day. Someone who
+// checked in after 7 is closed at 7 the next evening with no time counted, for them to fix.
+// Same rule as autoCheckOutTime in app.js.
+function autoCheckOutTime(checkIn) {
+  const at = new Date(checkIn);
+  at.setHours(AUTO_CHECK_OUT_HOUR, 0, 0, 0);
+  if (checkIn < at) return { due: at, end: at };
+  at.setDate(at.getDate() + 1);
+  return { due: at, end: new Date(checkIn) };
+}
+
+function sendAutoCheckOutEmail(c) {
+  const task = c.note ? `${c.activity}: ${c.note}` : c.activity;
+  const at = clock(c.end);
+  const day = Utilities.formatDate(c.checkIn, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  const edit = `${APP_URL}?edit=${encodeURIComponent(c.id)}&day=${day}`;
+  const ok = `${APP_URL}?continue=${encodeURIComponent(c.id)}`;
+  const button = (href, label, dark) =>
+    `<a href="${href}" style="display:inline-block;padding:14px 24px;margin:0 8px 8px 0;font-size:16px;text-decoration:none;` +
+    `background:${dark ? '#000' : '#f0f0f0'};color:${dark ? '#fff' : '#000'}">${label}</a>`;
+  MailApp.sendEmail({
+    to: c.email,
+    name: 'Time Tracker',
+    subject: `You were checked out of ${task} at ${at}`,
+    body: `You were still checked in to ${task}, so you were checked out automatically at ${at}.\n\n` +
+      `If that's right: ${ok}\nIf you worked later, edit your time: ${edit}`,
+    htmlBody: `<div style="font-family:-apple-system,Helvetica,Arial,sans-serif;color:#000;max-width:480px">` +
+      `<p style="font-size:18px">You were still checked in to <b>${escapeHtml(task)}</b>, so you were checked out automatically at <b>${at}</b>.</p>` +
+      `<p style="font-size:16px;color:#555">If you worked later, edit your time so your hours are right.</p>` +
+      button(ok, 'Continue', true) + button(edit, 'Edit my time', false) + `</div>`,
+  });
+}
+
+function escapeHtml(text) {
+  return String(text).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+}
+
+// Run this once from the Apps Script editor (pick "setUpAutoCheckOut" next to Run), and
+// approve the permissions it asks for. It runs autoCheckOut every hour and adds the Changes
+// column. Running it again is safe. The emails are sent from whoever runs it.
+function setUpAutoCheckOut() {
+  for (const t of ScriptApp.getProjectTriggers()) {
+    if (t.getHandlerFunction() === 'autoCheckOut') ScriptApp.deleteTrigger(t);
+  }
+  ScriptApp.newTrigger('autoCheckOut').timeBased().everyHours(1).create();
+  getLogTab().getRange(1, COL.changes).setValue('Changes').setFontWeight('bold');
 }
 
 // Checks Google's sign-in token and, if it's a verified Infinite Machine account,
@@ -176,6 +275,21 @@ function moveTabsIntoLog() {
       if (checkOut) setHours(log, row);
     }
   }
+}
+
+// Adds a line to the row's Changes cell, so managers can see what was changed and when.
+function addChange(sheet, row, text) {
+  const cell = sheet.getRange(row, COL.changes);
+  const old = String(cell.getValue());
+  if (!old.includes(text)) cell.setValue(old ? old + '; ' + text : text);
+}
+
+function clock(date) {
+  return Utilities.formatDate(date, Session.getScriptTimeZone(), 'h:mm a');
+}
+
+function stamp(date) {
+  return Utilities.formatDate(date, Session.getScriptTimeZone(), 'M/d h:mm a');
 }
 
 function findRow(sheet, id) {
