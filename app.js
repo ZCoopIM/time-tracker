@@ -16,10 +16,14 @@ const ACTIVITIES = [
   { name: 'Other', askForNote: true },
 ];
 
+// Anyone still checked in at this hour (7 PM) is checked out at it. Same as in google-sheet-script.gs.
+const AUTO_CHECK_OUT_HOUR = 19;
+
 // ---- Saved on this device ----
 // user:    who is signed in on this device: { name, email, session }
 // current: what they're checked in to right now, or null
-// queue:   check-ins/outs not yet confirmed by the Google Sheet (e.g. while offline)
+// queue:   check-ins/outs and time fixes not yet confirmed by the Google Sheet (e.g. while offline)
+// notice:  the 7 PM automatic check-out to tell them about, or null
 
 const store = {
   get(key, fallback) {
@@ -40,9 +44,16 @@ function render() {
   $('main-screen').hidden = !user || viewingDay;
   $('day-screen').hidden = !user || !viewingDay;
   if (!user) return;
+  autoCheckOut();
   if (viewingDay) renderDay();
 
   const current = store.get('current', null);
+  const notice = store.get('notice', null);
+  $('notice').hidden = !notice;
+  if (notice) {
+    const day = startOfDay(notice.checkIn).getTime() === startOfDay(new Date()).getTime() ? '' : ' on ' + shortDate(notice.checkIn);
+    $('notice-text').textContent = `You were still checked in to ${taskName(notice)}, so you were checked out at ${clock(notice.end)}${day}. If you worked later, fix your time.`;
+  }
   $('who').textContent = user.name;
   $('sign-out').hidden = !!current;
   $('current').hidden = !current;
@@ -76,9 +87,44 @@ function tick() {
   const m = String(Math.floor(secs / 60) % 60).padStart(2, '0');
   const s = String(secs % 60).padStart(2, '0');
   $('current-timer').textContent = `${h}:${m}:${s}`;
-  if (viewingDay) renderDay(); // keeps today's running task counting up
+  const mins = Math.floor(secs / 60);
+  if (viewingDay && !editing && mins !== dayMinute) { dayMinute = mins; renderDay(); } // keeps today's running task counting up
 }
-setInterval(tick, 1000);
+setInterval(() => { if (autoCheckOut()) render(); tick(); }, 1000);
+
+// ---- Automatic check-out at 7 PM ----
+// The sheet does this too, every hour, and emails them, so it happens even with the app
+// closed. This keeps the phone in step and shows the message when the app is next opened.
+
+// When an open entry gets closed, and the check-out time it gets: 7 PM that day. Someone who
+// checked in after 7 is closed at 7 the next evening with no time counted, for them to fix.
+function autoCheckOutTime(checkIn) {
+  const start = new Date(checkIn);
+  const at = new Date(start);
+  at.setHours(AUTO_CHECK_OUT_HOUR, 0, 0, 0);
+  if (start < at) return { due: at, end: at };
+  return { due: addDays(at, 1), end: start };
+}
+
+// Checks them out if it's past 7. Returns true if it did.
+function autoCheckOut() {
+  const current = store.get('current', null);
+  if (!current) return false;
+  const { due, end } = autoCheckOutTime(current.time);
+  if (Date.now() < due) return false;
+  store.set('current', null);
+  store.set('notice', { id: current.id, activity: current.activity, note: current.note, checkIn: current.time, end: end.toISOString() });
+  send({ type: 'out', id: current.id, activity: current.activity, time: end.toISOString(), auto: true });
+  return true;
+}
+
+function taskName(entry) {
+  return entry.note ? `${entry.activity}: ${entry.note}` : entry.activity;
+}
+
+function shortDate(time) {
+  return new Date(time).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+}
 
 function showOtherForm() {
   $('activities').hidden = true;
@@ -100,6 +146,9 @@ let viewingDay = false;
 let dayStart = startOfDay(new Date()); // midnight at the start of the day being shown
 let sheetEntries = []; // what the sheet sent back for that day
 let dayRequest = 0;    // so a slow answer for a day you've moved away from is ignored
+let dayMinute = -1;    // the running task's minute last shown, so the list redraws once a minute
+let editing = null;    // the entry being fixed, or {} when adding a missed one
+let editWhenLoaded = null; // entry to open for fixing once the day loads (from the 7 PM email or message)
 
 function startOfDay(date) {
   const d = new Date(date);
@@ -113,10 +162,12 @@ function addDays(date, n) {
   return d;
 }
 
-function openDay(start) {
+function openDay(start, editId = null) {
   viewingDay = true;
   dayStart = start;
   sheetEntries = [];
+  editWhenLoaded = editId;
+  closeEditor();
   render();
   loadDay();
 }
@@ -138,16 +189,22 @@ async function loadDay() {
     $('day-status').textContent = "Couldn't reach the sheet. Only showing what's on this device.";
   }
   renderDay();
+  const entry = editWhenLoaded && dayEntries().find((e) => e.id === editWhenLoaded);
+  editWhenLoaded = null;
+  if (entry) openEditor(entry);
 }
 
-// The day's entries, oldest first: the sheet's, plus check-ins and check-outs still waiting to send.
+// The day's entries, oldest first: the sheet's, plus changes still waiting to send.
 function dayEntries() {
   const byId = new Map(sheetEntries.map((e) => [e.id, { ...e }]));
   const session = store.get('user', {}).session;
   for (const q of store.get('queue', [])) {
     if (q.session !== session) continue;
-    if (q.type === 'in' && !byId.has(q.id)) byId.set(q.id, { id: q.id, activity: q.activity, note: q.note, checkIn: q.time, checkOut: null });
-    if (q.type === 'out' && byId.has(q.id)) byId.get(q.id).checkOut = q.time;
+    const e = byId.get(q.id);
+    if (q.type === 'in' && !e) byId.set(q.id, { id: q.id, activity: q.activity, note: q.note, checkIn: q.time, checkOut: null });
+    if (q.type === 'add' && !e) byId.set(q.id, { id: q.id, activity: q.activity, note: q.note, checkIn: q.checkIn, checkOut: q.checkOut });
+    if (q.type === 'out' && e) e.checkOut = q.time;
+    if (q.type === 'edit' && e) { e.checkIn = q.checkIn; if (q.checkOut) e.checkOut = q.checkOut; }
   }
   const from = dayStart.getTime(), to = addDays(dayStart, 1).getTime();
   return [...byId.values()]
@@ -172,17 +229,18 @@ function renderDay() {
     const running = !e.checkOut && current && current.id === e.id;
     const end = e.checkOut ? new Date(e.checkOut) : running ? Date.now() : new Date(e.checkIn);
     const ms = Math.max(0, end - new Date(e.checkIn)); // never negative, even if a phone's clock was off
-    const name = e.note ? `${e.activity}: ${e.note}` : e.activity;
+    const name = taskName(e);
     total += ms;
     if (e.checkOut || running) tasks.set(name, (tasks.get(name) || 0) + ms); // a forgotten check-out has no time to count
     const until = e.checkOut ? clock(e.checkOut) : running ? 'now' : 'no check-out';
-    timeline.push({ name, detail: `${clock(e.checkIn)} – ${until}`, time: running || e.checkOut ? duration(ms) : '', running });
+    timeline.push({ name, detail: `${clock(e.checkIn)} – ${until}`, time: running || e.checkOut ? duration(ms) : '', running, onClick: () => openEditor(e) });
   }
 
   $('day-total').textContent = duration(total);
   $('day-tasks-block').hidden = !entries.length;
   fillList($('day-tasks'), [...tasks].sort((a, b) => b[1] - a[1]).map(([name, ms]) => ({ name, time: duration(ms) })));
   fillList($('day-entries'), timeline);
+  $('day-add').hidden = dayStart > today;
   if (!entries.length && !$('day-status').textContent) $('day-status').textContent = 'Nothing logged this day.';
   if (entries.length && $('day-status').textContent === 'Nothing logged this day.') $('day-status').textContent = '';
 }
@@ -190,9 +248,14 @@ function renderDay() {
 function fillList(list, items) {
   list.innerHTML = '';
   for (const item of items) {
-    const row = document.createElement('div');
+    const row = document.createElement(item.onClick ? 'button' : 'div');
     row.className = 'day-row';
     row.innerHTML = '<div><p class="day-name"></p><p class="day-detail"></p></div><p class="day-time"></p>';
+    if (item.onClick) {
+      row.type = 'button';
+      row.onclick = item.onClick;
+      row.insertAdjacentHTML('beforeend', '<svg class="chevron" viewBox="0 0 8 14" aria-hidden="true"><path d="M1 1l6 6-6 6"/></svg>');
+    }
     row.querySelector('.day-name').textContent = item.name;
     row.querySelector('.day-detail').textContent = item.detail || '';
     row.querySelector('.day-detail').hidden = !item.detail;
@@ -200,6 +263,81 @@ function fillList(list, items) {
     if (item.running) row.querySelector('.day-name').insertAdjacentHTML('afterbegin', '<span class="dot"></span>');
     list.appendChild(row);
   }
+}
+
+// ---- Fixing a time ----
+// Tap an entry in the timeline to change its check-in or check-out (forgot to check out,
+// worked past 7), or add time you forgot to check in for. Only the day being shown.
+
+function openEditor(entry) {
+  editing = entry;
+  const adding = !entry.id;
+  const running = isRunning(entry);
+  $('day-view').hidden = true;
+  document.querySelector('.day-nav').hidden = true;
+  $('edit-form').hidden = false;
+  $('edit-title').textContent = adding ? `Add time · ${$('day-date').textContent}` : `${taskName(entry)} · ${$('day-date').textContent}`;
+  $('edit-task-fields').hidden = !adding;
+  $('edit-activity').value = ACTIVITIES[0].name;
+  $('edit-note').value = '';
+  $('edit-note').hidden = true;
+  $('edit-out-field').hidden = running; // still checked in: only the start can change
+  $('edit-in').value = adding ? '' : timeValue(entry.checkIn);
+  $('edit-out').value = adding || !entry.checkOut ? '' : timeValue(entry.checkOut);
+  $('edit-error').textContent = '';
+  window.scrollTo(0, 0);
+}
+
+function closeEditor() {
+  editing = null;
+  $('day-view').hidden = false;
+  document.querySelector('.day-nav').hidden = false;
+  $('edit-form').hidden = true;
+}
+
+function isRunning(entry) {
+  const current = store.get('current', null);
+  return !!entry.id && !entry.checkOut && !!current && current.id === entry.id;
+}
+
+function saveEdit() {
+  const adding = !editing.id;
+  const running = isRunning(editing);
+  const checkIn = atTime(dayStart, $('edit-in').value);
+  const checkOut = running ? null : atTime(dayStart, $('edit-out').value);
+  const activity = adding ? $('edit-activity').value : editing.activity;
+  const note = adding ? (ACTIVITIES.find((a) => a.name === activity).askForNote ? $('edit-note').value.trim() : '') : editing.note;
+
+  const error = !checkIn ? 'Enter a check-in time.'
+    : !running && !checkOut ? 'Enter a check-out time.'
+    : checkOut && checkOut <= checkIn ? 'Check-out has to be after check-in.'
+    : (checkOut || checkIn) > Date.now() + 60000 ? "That time hasn't happened yet."
+    : adding && activity === 'Other' && !note ? 'Say what you were working on.'
+    : '';
+  $('edit-error').textContent = error;
+  if (error) return;
+
+  const entry = { ...editing, id: adding ? newId() : editing.id, activity, note, checkIn: checkIn.toISOString(), checkOut: checkOut && checkOut.toISOString() };
+  send({ type: adding ? 'add' : 'edit', id: entry.id, activity, note, checkIn: entry.checkIn, checkOut: entry.checkOut, time: new Date().toISOString() });
+  sheetEntries = [...sheetEntries.filter((e) => e.id !== entry.id), entry]; // show it now, without waiting for the sheet
+  if (running) store.set('current', { ...store.get('current', null), time: entry.checkIn }); // the timer starts from the fixed time
+  closeEditor();
+  render();
+}
+
+// "14:30" on the given day, as a date. Empty gives null.
+function atTime(day, value) {
+  if (!value) return null;
+  const [h, m] = value.split(':').map(Number);
+  const d = new Date(day);
+  d.setHours(h, m, 0, 0);
+  return d;
+}
+
+// A date's time as "14:30", for the time inputs
+function timeValue(time) {
+  const d = new Date(time);
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
 function clock(time) {
@@ -217,18 +355,23 @@ function duration(ms) {
 
 function checkIn(activity, note) {
   checkOut(); // switching activities ends the current one first
-  const entry = { id: Date.now() + '-' + Math.random().toString(36).slice(2, 8), activity, note, time: new Date().toISOString() };
+  const entry = { id: newId(), activity, note, time: new Date().toISOString() };
   store.set('current', entry);
   send({ type: 'in', ...entry });
   render();
 }
 
 function checkOut() {
+  if (autoCheckOut()) return render(); // past 7 PM: that's when they were checked out
   const current = store.get('current', null);
   if (!current) return;
   store.set('current', null);
   send({ type: 'out', id: current.id, activity: current.activity, time: new Date().toISOString() });
   render();
+}
+
+function newId() {
+  return Date.now() + '-' + Math.random().toString(36).slice(2, 8);
 }
 
 // ---- Sending to the Google Sheet ----
@@ -346,9 +489,42 @@ $('sign-out').onclick = signOut;
 $('check-out').onclick = checkOut;
 
 $('day-open').onclick = () => openDay(startOfDay(new Date()));
-$('day-back').onclick = () => { viewingDay = false; dayRequest++; render(); };
+$('day-back').onclick = () => {
+  if (editing) return closeEditor(); // Back from the edit form goes to the day, not all the way out
+  viewingDay = false;
+  dayRequest++;
+  render();
+};
 $('day-prev').onclick = () => openDay(addDays(dayStart, -1));
 $('day-next').onclick = () => openDay(addDays(dayStart, 1));
+
+$('day-add').onclick = () => openEditor({});
+$('edit-form').onsubmit = (e) => { e.preventDefault(); saveEdit(); };
+$('edit-cancel').onclick = closeEditor;
+$('edit-activity').innerHTML = ACTIVITIES.map((a) => `<option>${a.name}</option>`).join('');
+$('edit-activity').onchange = () => {
+  $('edit-note').hidden = !ACTIVITIES.find((a) => a.name === $('edit-activity').value).askForNote;
+};
+
+$('notice-continue').onclick = () => { store.set('notice', null); render(); };
+$('notice-edit').onclick = () => {
+  const notice = store.get('notice', null);
+  store.set('notice', null);
+  openDay(startOfDay(notice.checkIn), notice.id);
+};
+
+// Links in the 7 PM email: ?continue=<entry> just clears the message; ?edit=<entry>&day=2026-09-28
+// opens that entry for fixing.
+function openEmailLink() {
+  const params = new URLSearchParams(location.search);
+  const id = params.get('edit') || params.get('continue');
+  if (!id) return;
+  history.replaceState(null, '', location.pathname);
+  if ((store.get('notice', null) || {}).id === id) store.set('notice', null);
+  const [y, m, d] = (params.get('day') || '').split('-').map(Number);
+  if (params.has('edit') && store.get('user', null)) openDay(y ? new Date(y, m - 1, d) : startOfDay(new Date()), id);
+  else render();
+}
 
 $('other-form').onsubmit = (e) => {
   e.preventDefault();
@@ -366,5 +542,6 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
 if (navigator.storage && navigator.storage.persist) navigator.storage.persist();
 store.set('name', null); // left over from the version where people typed their name
 render();
+openEmailLink();
 finishSignIn();
 flush();
