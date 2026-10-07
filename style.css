@@ -228,3 +228,8 @@ select {
 }
 .field input { width: auto; min-width: 150px; margin: 0; text-align: right; border: 0; }
 #edit-error { color: var(--black); padding-bottom: 12px; }
+
+/* Servicing: list of work orders to pick from */
+#work-order-picker { margin-top: var(--gutter); }
+#work-order-list { margin-bottom: var(--gutter); }
+#work-order-status { padding-bottom: 12px; }

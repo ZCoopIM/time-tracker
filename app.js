@@ -7,11 +7,12 @@ const SHEET_URL = 'https://script.google.com/macros/s/AKfycbyTmXz_Fwydt-RkJQGsrA
 const GOOGLE_CLIENT_ID = '1056506310679-dhv65s90fnc6fjev24va2c6k57n731oj.apps.googleusercontent.com';
 const DOMAIN = 'infinitemachine.com';
 
-// The buttons people tap. "Other" asks them to type what they're doing.
+// The buttons people tap. "Other" asks them to type what they're doing; "Servicing" asks which
+// work order (from Airtable, through the sheet's script).
 const ACTIVITIES = [
   { name: 'QC' },
   { name: 'Fabrication' },
-  { name: 'Servicing' },
+  { name: 'Servicing', askForWorkOrder: true },
   { name: 'Transport' },
   { name: 'Other', askForNote: true },
 ];
@@ -24,6 +25,7 @@ const AUTO_CHECK_OUT_HOUR = 19;
 // current: what they're checked in to right now, or null
 // queue:   check-ins/outs and time fixes not yet confirmed by the Google Sheet (e.g. while offline)
 // notice:  the 7 PM automatic check-out to tell them about, or null
+// workOrders: the last list of open work orders, so Servicing works with no signal
 
 const store = {
   get(key, fallback) {
@@ -60,7 +62,7 @@ function render() {
   $('prompt').textContent = current ? 'Switch task' : 'Select task';
 
   if (current) {
-    $('current-activity').textContent = current.note ? `${current.activity}: ${current.note}` : current.activity;
+    $('current-activity').textContent = taskName(current);
     $('current-since').textContent = 'Since ' + new Date(current.time).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
     tick();
   }
@@ -68,12 +70,12 @@ function render() {
   const list = $('activities');
   list.innerHTML = '';
   for (const a of ACTIVITIES) {
-    if (current && current.activity === a.name && !a.askForNote) continue; // already doing this one
+    if (current && current.activity === a.name && !a.askForNote && !a.askForWorkOrder) continue; // already doing this one
     const b = document.createElement('button');
     b.className = 'row';
     b.innerHTML = '<span></span><svg class="chevron" viewBox="0 0 8 14" aria-hidden="true"><path d="M1 1l6 6-6 6"/></svg>';
     b.firstChild.textContent = a.name;
-    b.onclick = () => (a.askForNote ? showOtherForm() : checkIn(a.name, ''));
+    b.onclick = () => (a.askForNote ? showOtherForm() : a.askForWorkOrder ? showWorkOrders() : checkIn(a.name, ''));
     list.appendChild(b);
   }
   renderSync();
@@ -113,13 +115,14 @@ function autoCheckOut() {
   const { due, end } = autoCheckOutTime(current.time);
   if (Date.now() < due) return false;
   store.set('current', null);
-  store.set('notice', { id: current.id, activity: current.activity, note: current.note, checkIn: current.time, end: end.toISOString() });
+  store.set('notice', { id: current.id, activity: current.activity, note: current.note, workOrder: current.workOrder, checkIn: current.time, end: end.toISOString() });
   send({ type: 'out', id: current.id, activity: current.activity, time: end.toISOString(), auto: true });
   return true;
 }
 
+// "QC", "Other: Cleaning shop", "Servicing IM-WO-26-0688"
 function taskName(entry) {
-  return entry.note ? `${entry.activity}: ${entry.note}` : entry.activity;
+  return (entry.workOrder ? `${entry.activity} ${entry.workOrder}` : entry.activity) + (entry.note ? `: ${entry.note}` : '');
 }
 
 function shortDate(time) {
@@ -136,6 +139,76 @@ function showOtherForm() {
 function hideOtherForm() {
   $('activities').hidden = false;
   $('other-form').hidden = true;
+}
+
+// ---- Servicing: pick a work order ----
+// Shows the last list saved on the phone straight away, then the fresh one from Airtable.
+
+function showWorkOrders() {
+  $('activities').hidden = true;
+  $('prompt').hidden = true;
+  $('day-open').hidden = true;
+  $('work-order-picker').hidden = false;
+  renderWorkOrders();
+  $('work-order-status').textContent = 'Loading work orders';
+  loadWorkOrders().then((error) => {
+    $('work-order-status').textContent = error && store.get('workOrders', []).length ? "Couldn't refresh the list. This is the last one saved."
+      : error ? "Couldn't load work orders. Use \"Not on the list\" for now." : '';
+    if (!$('work-order-picker').hidden) renderWorkOrders();
+  });
+}
+
+function hideWorkOrders() {
+  $('activities').hidden = false;
+  $('prompt').hidden = false;
+  $('day-open').hidden = false;
+  $('work-order-picker').hidden = true;
+}
+
+// Fetches the list from the sheet's script and saves it. Returns an error message, or '' if it worked.
+async function loadWorkOrders() {
+  const user = store.get('user', null);
+  if (!user) return 'Not signed in';
+  try {
+    const result = await post({ type: 'workOrders', session: user.session });
+    if (result.auth) { signOut(); return 'Not signed in'; }
+    if (!result.ok) throw new Error(result.error);
+    store.set('workOrders', result.workOrders);
+    fillWorkOrderSelect();
+    return '';
+  } catch (err) {
+    console.warn('Could not load work orders:', err);
+    return String(err.message || err);
+  }
+}
+
+function renderWorkOrders() {
+  const list = $('work-order-list');
+  list.innerHTML = '';
+  for (const w of store.get('workOrders', [])) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'day-row';
+    b.innerHTML = '<div><p class="day-name"></p><p class="day-detail"></p></div><svg class="chevron" viewBox="0 0 8 14" aria-hidden="true"><path d="M1 1l6 6-6 6"/></svg>';
+    b.querySelector('.day-name').textContent = w.id;
+    b.querySelector('.day-detail').textContent = [w.summary, w.center, w.status].filter(Boolean).join(' · ');
+    b.onclick = () => { hideWorkOrders(); checkIn('Servicing', '', w.id); };
+    list.appendChild(b);
+  }
+}
+
+// The work order choices in the "add time" form
+function fillWorkOrderSelect() {
+  const select = $('edit-work-order');
+  const chosen = select.value;
+  select.innerHTML = '<option value="">No work order</option>';
+  for (const w of store.get('workOrders', [])) {
+    const o = document.createElement('option');
+    o.value = w.id;
+    o.textContent = w.summary ? `${w.id} · ${w.summary}` : w.id;
+    select.appendChild(o);
+  }
+  select.value = chosen;
 }
 
 // ---- My day ----
@@ -201,8 +274,8 @@ function dayEntries() {
   for (const q of store.get('queue', [])) {
     if (q.session !== session) continue;
     const e = byId.get(q.id);
-    if (q.type === 'in' && !e) byId.set(q.id, { id: q.id, activity: q.activity, note: q.note, checkIn: q.time, checkOut: null });
-    if (q.type === 'add' && !e) byId.set(q.id, { id: q.id, activity: q.activity, note: q.note, checkIn: q.checkIn, checkOut: q.checkOut });
+    if (q.type === 'in' && !e) byId.set(q.id, { id: q.id, activity: q.activity, note: q.note, workOrder: q.workOrder, checkIn: q.time, checkOut: null });
+    if (q.type === 'add' && !e) byId.set(q.id, { id: q.id, activity: q.activity, note: q.note, workOrder: q.workOrder, checkIn: q.checkIn, checkOut: q.checkOut });
     if (q.type === 'out' && e) e.checkOut = q.time;
     if (q.type === 'edit' && e) { e.checkIn = q.checkIn; if (q.checkOut) e.checkOut = q.checkOut; }
   }
@@ -280,7 +353,9 @@ function openEditor(entry) {
   $('edit-task-fields').hidden = !adding;
   $('edit-activity').value = ACTIVITIES[0].name;
   $('edit-note').value = '';
-  $('edit-note').hidden = true;
+  fillWorkOrderSelect();
+  $('edit-work-order').value = '';
+  showTaskExtras();
   $('edit-out-field').hidden = running; // still checked in: only the start can change
   $('edit-in').value = adding ? '' : timeValue(entry.checkIn);
   $('edit-out').value = adding || !entry.checkOut ? '' : timeValue(entry.checkOut);
@@ -306,7 +381,9 @@ function saveEdit() {
   const checkIn = atTime(dayStart, $('edit-in').value);
   const checkOut = running ? null : atTime(dayStart, $('edit-out').value);
   const activity = adding ? $('edit-activity').value : editing.activity;
-  const note = adding ? (ACTIVITIES.find((a) => a.name === activity).askForNote ? $('edit-note').value.trim() : '') : editing.note;
+  const task = ACTIVITIES.find((a) => a.name === activity) || {};
+  const note = adding ? (task.askForNote ? $('edit-note').value.trim() : '') : editing.note;
+  const workOrder = adding ? (task.askForWorkOrder ? $('edit-work-order').value : '') : editing.workOrder || '';
 
   const error = !checkIn ? 'Enter a check-in time.'
     : !running && !checkOut ? 'Enter a check-out time.'
@@ -317,8 +394,8 @@ function saveEdit() {
   $('edit-error').textContent = error;
   if (error) return;
 
-  const entry = { ...editing, id: adding ? newId() : editing.id, activity, note, checkIn: checkIn.toISOString(), checkOut: checkOut && checkOut.toISOString() };
-  send({ type: adding ? 'add' : 'edit', id: entry.id, activity, note, checkIn: entry.checkIn, checkOut: entry.checkOut, time: new Date().toISOString() });
+  const entry = { ...editing, id: adding ? newId() : editing.id, activity, note, workOrder, checkIn: checkIn.toISOString(), checkOut: checkOut && checkOut.toISOString() };
+  send({ type: adding ? 'add' : 'edit', id: entry.id, activity, note, workOrder, checkIn: entry.checkIn, checkOut: entry.checkOut, time: new Date().toISOString() });
   sheetEntries = [...sheetEntries.filter((e) => e.id !== entry.id), entry]; // show it now, without waiting for the sheet
   if (running) store.set('current', { ...store.get('current', null), time: entry.checkIn }); // the timer starts from the fixed time
   closeEditor();
@@ -353,9 +430,9 @@ function duration(ms) {
 
 // ---- Check in / check out ----
 
-function checkIn(activity, note) {
+function checkIn(activity, note, workOrder = '') {
   checkOut(); // switching activities ends the current one first
-  const entry = { id: newId(), activity, note, time: new Date().toISOString() };
+  const entry = { id: newId(), activity, note, workOrder, time: new Date().toISOString() };
   store.set('current', entry);
   send({ type: 'in', ...entry });
   render();
@@ -502,9 +579,17 @@ $('day-add').onclick = () => openEditor({});
 $('edit-form').onsubmit = (e) => { e.preventDefault(); saveEdit(); };
 $('edit-cancel').onclick = closeEditor;
 $('edit-activity').innerHTML = ACTIVITIES.map((a) => `<option>${a.name}</option>`).join('');
-$('edit-activity').onchange = () => {
-  $('edit-note').hidden = !ACTIVITIES.find((a) => a.name === $('edit-activity').value).askForNote;
-};
+// In the "add time" form: Other asks what it was, Servicing asks which work order.
+function showTaskExtras() {
+  const task = ACTIVITIES.find((a) => a.name === $('edit-activity').value) || {};
+  $('edit-note').hidden = !task.askForNote;
+  $('edit-work-order').hidden = !task.askForWorkOrder;
+  if (task.askForWorkOrder) loadWorkOrders(); // freshen the choices if there's signal
+}
+$('edit-activity').onchange = showTaskExtras;
+
+$('work-order-none').onclick = () => { hideWorkOrders(); checkIn('Servicing', ''); };
+$('work-order-cancel').onclick = hideWorkOrders;
 
 $('notice-continue').onclick = () => { store.set('notice', null); render(); };
 $('notice-edit').onclick = () => {
@@ -545,3 +630,4 @@ render();
 openEmailLink();
 finishSignIn();
 flush();
+loadWorkOrders(); // so the Servicing list is ready, and saved for when there's no signal
