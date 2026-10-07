@@ -12,13 +12,23 @@
 // and hands back a session that the app includes with every entry.
 
 const LOG_TAB = 'Time Log';
-const HEADERS = ['Date', 'Name', 'Email', 'Activity', 'Note', 'Check In', 'Check Out', 'Hours', 'Entry ID', 'Changes'];
-const COL = { date: 1, email: 3, checkIn: 6, checkOut: 7, hours: 8, id: 9, changes: 10 }; // column numbers in HEADERS
+const HEADERS = ['Date', 'Name', 'Email', 'Activity', 'Note', 'Check In', 'Check Out', 'Hours', 'Entry ID', 'Changes', 'Work Order'];
+const COL = { date: 1, email: 3, checkIn: 6, checkOut: 7, hours: 8, id: 9, changes: 10, workOrder: 11 }; // column numbers in HEADERS
 const GOOGLE_CLIENT_ID = '1056506310679-dhv65s90fnc6fjev24va2c6k57n731oj.apps.googleusercontent.com'; // same as in app.js
 const DOMAIN = 'infinitemachine.com';
 const SESSION_DAYS = 365; // how long someone stays signed in on a device
 const AUTO_CHECK_OUT_HOUR = 19; // 7 PM, in the script's time zone (Project Settings); same as in app.js
 const APP_URL = 'https://timetracker.infinitemachine.com/'; // for the links in the 7 PM email
+
+// Work orders people pick from when they check in to Servicing: the Work Orders table in the
+// "Vehicle & Sales Master" Airtable base, only those in these statuses. Needs AIRTABLE_TOKEN in
+// Project Settings → Script Properties (see README.md).
+const AIRTABLE = {
+  base: 'app1hOf3bdBiboN8j',
+  table: 'tblk4PnArh2GFQlRh',
+  fields: { id: 'fldKQrifloMI9ciHf', status: 'fldy9UMMorhQuA8lk', summary: 'fld3yC8heVVImtVIR', center: 'fldISQeEFWHPBrRgL' },
+};
+const WORK_ORDER_STATUSES = ['In Service', 'Service Queue']; // listed in this order
 
 function doPost(e) {
   let d;
@@ -32,6 +42,13 @@ function doPost(e) {
   const user = readSession(d.session);
   if (!user) return reply({ ok: false, auth: true, error: 'Not signed in' });
   if (d.type === 'day') return reply(day(user, d)); // only reads, so no need to wait for the lock
+  if (d.type === 'workOrders') {
+    try {
+      return reply(workOrders());
+    } catch (err) {
+      return reply({ ok: false, error: String(err) });
+    }
+  }
 
   const lock = LockService.getScriptLock();
   lock.waitLock(20000); // one write at a time, so two people tapping at once can't collide
@@ -43,11 +60,11 @@ function doPost(e) {
     const row = findRow(sheet, d.id);
 
     if (d.type === 'in' && !row) { // "!row" means a resent check-in won't be added twice
-      addRow(sheet, [time, user.name, user.email, d.activity, d.note || '', time, '', '', d.id]);
+      addRow(sheet, [time, user.name, user.email, d.activity, d.note || '', time, '', '', d.id, '', d.workOrder || '']);
     } else if (d.type === 'add' && !row) { // time someone forgot to check in for, added from "My day"
       const checkIn = new Date(d.checkIn), checkOut = new Date(d.checkOut);
       if (!(checkOut > checkIn)) return reply({ ok: true, ignored: true }); // the app checks this too; drop it, don't retry
-      const added = addRow(sheet, [checkIn, user.name, user.email, d.activity, d.note || '', checkIn, checkOut, '', d.id, 'Added by hand ' + stamp(time)]);
+      const added = addRow(sheet, [checkIn, user.name, user.email, d.activity, d.note || '', checkIn, checkOut, '', d.id, 'Added by hand ' + stamp(time), d.workOrder || '']);
       setHours(sheet, added);
     } else if ((d.type === 'out' || d.type === 'edit') && row) {
       // People can only change their own entries. Rows moved over from the old
@@ -83,18 +100,87 @@ function doPost(e) {
 function day(user, d) {
   const from = new Date(d.from), to = new Date(d.to);
   const entries = [];
-  for (const [, name, email, activity, note, checkIn, checkOut, , id] of getLogTab().getDataRange().getValues().slice(1)) {
+  for (const [, name, email, activity, note, checkIn, checkOut, , id, , workOrder] of getLogTab().getDataRange().getValues().slice(1)) {
     if (!(checkIn instanceof Date) || checkIn < from || checkIn >= to) continue;
     if (email ? email !== user.email : name !== user.name) continue; // rows moved over from the old per-person tabs have only a name
     entries.push({
       id: String(id),
       activity,
       note,
+      workOrder: workOrder || '',
       checkIn: checkIn.toISOString(),
       checkOut: checkOut instanceof Date ? checkOut.toISOString() : null,
     });
   }
   return { ok: true, entries };
+}
+
+// ---- Work orders from Airtable ----
+
+// The open work orders for the Servicing list, in Airtable order. Kept for 5 minutes, so tapping
+// Servicing is quick and Airtable isn't asked on every tap.
+function workOrders() {
+  const cache = CacheService.getScriptCache();
+  const cached = cache.get('workOrders');
+  if (cached) return { ok: true, workOrders: JSON.parse(cached) };
+
+  const token = PropertiesService.getScriptProperties().getProperty('AIRTABLE_TOKEN');
+  if (!token) return { ok: false, error: "Work orders aren't connected yet." };
+
+  const f = AIRTABLE.fields;
+  const list = [];
+  for (const r of airtableRecords(token)) {
+    const c = r.fields;
+    const status = c[f.status] && c[f.status].name ? c[f.status].name : c[f.status];
+    if (!WORK_ORDER_STATUSES.includes(status) || !c[f.id]) continue;
+    const center = c[f.center] && c[f.center].name ? c[f.center].name : c[f.center];
+    list.push({ id: c[f.id], summary: String(c[f.summary] || '').trim(), center: center || '', status, created: r.createdTime });
+  }
+  list.sort((a, b) => WORK_ORDER_STATUSES.indexOf(a.status) - WORK_ORDER_STATUSES.indexOf(b.status) || (a.created < b.created ? 1 : -1));
+  list.forEach((w) => delete w.created);
+  cache.put('workOrders', JSON.stringify(list), 300);
+  return { ok: true, workOrders: list };
+}
+
+// Every Work Orders record in the wanted statuses, with just the fields above. Asks Airtable
+// to filter by Status; if that ever fails (say the field is renamed), reads them all instead.
+function airtableRecords(token) {
+  const f = AIRTABLE.fields;
+  const fields = Object.values(f).map((id) => 'fields[]=' + id).join('&');
+  const filter = 'filterByFormula=' + encodeURIComponent('OR(' + WORK_ORDER_STATUSES.map((s) => `{Status}='${s}'`).join(',') + ')');
+  const read = (query) => {
+    const records = [];
+    let offset = '';
+    do {
+      const url = `https://api.airtable.com/v0/${AIRTABLE.base}/${AIRTABLE.table}?returnFieldsByFieldId=true&${fields}&${query}` + (offset ? '&offset=' + offset : '');
+      const res = UrlFetchApp.fetch(url, { headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true });
+      if (res.getResponseCode() !== 200) throw new Error('Airtable ' + res.getResponseCode() + ': ' + res.getContentText().slice(0, 200));
+      const page = JSON.parse(res.getContentText());
+      records.push(...page.records);
+      offset = page.offset || '';
+    } while (offset);
+    return records;
+  };
+  try {
+    return read(filter);
+  } catch (err) {
+    console.warn('Filtered read failed, reading all work orders:', err);
+    return read('pageSize=100');
+  }
+}
+
+// Pick "checkWorkOrders" next to Run to see the Servicing list the app gets, fresh from
+// Airtable, in the Execution log. Handy after changing the token or the statuses.
+function checkWorkOrders() {
+  CacheService.getScriptCache().remove('workOrders');
+  const result = workOrders();
+  console.log(result.ok ? result.workOrders.map((w) => `${w.id}  ${w.status}  ${w.center}  ${w.summary}`).join('\n') || 'No work orders in those statuses.' : result.error);
+}
+
+// Run this once from the Apps Script editor (pick "addWorkOrderColumn" next to Run) to add the
+// Work Order column header to the Time Log tab. Running it again is safe.
+function addWorkOrderColumn() {
+  getLogTab().getRange(1, COL.workOrder).setValue('Work Order').setFontWeight('bold');
 }
 
 // ---- Automatic check-out at 7 PM ----
@@ -110,7 +196,7 @@ function autoCheckOut() {
   try {
     const sheet = getLogTab();
     const now = new Date();
-    sheet.getDataRange().getValues().forEach(([, , email, activity, note, checkIn, checkOut, , id], i) => {
+    sheet.getDataRange().getValues().forEach(([, , email, activity, note, checkIn, checkOut, , id, , workOrder], i) => {
       if (i === 0 || !(checkIn instanceof Date) || checkOut) return; // header, or already checked out
       const { due, end } = autoCheckOutTime(checkIn);
       if (now < due) return;
@@ -119,7 +205,7 @@ function autoCheckOut() {
       setHours(sheet, row);
       addChange(sheet, row, AUTO_NOTE);
       // Only email about today's. The first run also closes old forgotten entries, quietly.
-      if (email && now - due < 864e5) closed.push({ email, activity, note, checkIn, end, id: String(id) });
+      if (email && now - due < 864e5) closed.push({ email, activity, note, workOrder, checkIn, end, id: String(id) });
     });
   } finally {
     lock.releaseLock();
@@ -139,7 +225,7 @@ function autoCheckOutTime(checkIn) {
 }
 
 function sendAutoCheckOutEmail(c) {
-  const task = c.note ? `${c.activity}: ${c.note}` : c.activity;
+  const task = (c.workOrder ? `${c.activity} ${c.workOrder}` : c.activity) + (c.note ? `: ${c.note}` : '');
   const at = clock(c.end);
   const day = Utilities.formatDate(c.checkIn, Session.getScriptTimeZone(), 'yyyy-MM-dd');
   const edit = `${APP_URL}?edit=${encodeURIComponent(c.id)}&day=${day}`;

@@ -67,6 +67,15 @@
         <button class="btn" type="button" id="other-cancel">Cancel</button>
       </form>
 
+      <!-- Servicing: pick the work order (Service Queue or In Service in Airtable) -->
+      <div id="work-order-picker" hidden>
+        <p class="eyebrow">Which work order?</p>
+        <div id="work-order-list" class="day-list"></div>
+        <p id="work-order-status" class="status"></p>
+        <button class="btn" type="button" id="work-order-none">Not on the list</button>
+        <button class="btn" type="button" id="work-order-cancel">Cancel</button>
+      </div>
+
       <button id="day-open" class="row">
         <span>My day</span><svg class="chevron" viewBox="0 0 8 14" aria-hidden="true"><path d="M1 1l6 6-6 6"/></svg>
       </button>
@@ -106,6 +115,7 @@
         <div id="edit-task-fields">
           <select id="edit-activity" aria-label="Task"></select>
           <input id="edit-note" placeholder="What were you working on?">
+          <select id="edit-work-order" aria-label="Work order"></select>
         </div>
         <label class="field"><span>Check in</span><input id="edit-in" type="time"></label>
         <label class="field" id="edit-out-field"><span>Check out</span><input id="edit-out" type="time"></label>

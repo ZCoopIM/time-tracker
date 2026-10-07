@@ -23,6 +23,11 @@ signal).
 **Fixing a time:** in My day, tap any entry in the timeline to change its check-in or check-out
 (forgot to check out, worked past 7), or tap **Add time you forgot to check in**.
 
+**Servicing:** tapping **Servicing** asks which work order, from the Work Orders table in Airtable
+(the "Vehicle & Sales Master" base), listing the ones in **In Service** or **Service Queue**. Each
+shows its ID, what the job is and the service center. **Not on the list** checks in with no work
+order. The phone keeps the last list, so it works with no signal.
+
 **7 PM check-out:** anyone still checked in at 7 PM is checked out at 7:00 PM. They get an email
 with **Continue** (it's right) and **Edit my time** (opens that entry to fix), and the app shows the
 same message next time it's opened. Someone who checked in after 7 is closed the next evening with
@@ -43,6 +48,8 @@ Everything goes in one **Time Log** tab, one row per check-in:
 Name and email come from the person's Google sign-in. A row with no Check Out means they're
 working on it right now. Filter or sort by Name to see one person. (There's also a hidden
 "Entry ID" column that matches check-outs to check-ins; leave it alone.)
+
+The last column, **Work Order**, has the work order ID for Servicing time (blank otherwise).
 
 The **Changes** column, after Entry ID, records anything that wasn't a normal tap, so it's easy
 to spot corrected hours: "Checked out automatically at 7 PM", "Edited 9/28 8:15 AM, was 5:00 PM to
@@ -88,6 +95,18 @@ permissions it asks for (sending email, running on a schedule). Do this **before
 new version, or the web app stops working until it's approved. It checks every hour for anyone
 still checked in past 7 PM. The emails come from whoever ran it. The 7 PM is in the script's time
 zone (**Project Settings → Time zone**), so that has to match where people work.
+
+### 2c. Connect the work orders (Airtable)
+
+1. At https://airtable.com/create/tokens, create a token named "Time Tracker" with the scope
+   **data.records:read** only, and access to the **Vehicle & Sales Master** base. Copy it.
+2. In the Apps Script editor: **Project Settings → Script Properties → Add script property**,
+   name `AIRTABLE_TOKEN`, value the token. Save.
+3. Pick **addWorkOrderColumn** next to Run and run it once, to add the Work Order column header.
+
+The table, the field IDs and which statuses are listed are in `AIRTABLE` and
+`WORK_ORDER_STATUSES` at the top of `google-sheet-script.gs`. The list is kept for 5 minutes, so
+a work order that just changed status shows up (or drops off) within 5 minutes.
 
 ### 3. Put the app online
 
